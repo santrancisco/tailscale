@@ -193,6 +193,22 @@
   }
 
   /**
+   * .radio applies default styles to input[type="radio"] form elements.
+   */
+
+  .radio {
+    @apply appearance-none w-4 h-4 rounded-full border border-gray-300 shrink-0 shadow-form;
+  }
+
+  .radio:checked {
+    @apply border-blue-500 border-[5px];
+  }
+
+  .radio:focus {
+    @apply focus-visible:ring focus-visible:outline-none;
+  }
+
+  /**
    * .toggle applies "Toggle" UI styles to input[type="checkbox"] form elements.
    * You can use the -large and -small modifiers for size variants.
    */

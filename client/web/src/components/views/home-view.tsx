@@ -117,12 +117,13 @@ export default function HomeView({
             }
           />
         )}
-        {/* TODO(sonia,will): hiding unimplemented settings pages until implemented */}
-        {/* <SettingsCard
-        link="/serve"
-        title="Share local content"
-        body="Share local ports, services, and content to your Tailscale network or to the broader internet."
-      /> */}
+        {node.Features["serve"] && (
+          <SettingsCard
+            link="/serve"
+            title="Share local content"
+            body="Share local ports, services, and content to your Tailscale network or to the broader internet."
+          />
+        )}
       </div>
     </div>
   )

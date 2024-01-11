@@ -794,6 +794,7 @@ func availableFeatures() map[string]bool {
 		"advertise-routes":    true, // available on all platforms
 		"use-exit-node":       canUseExitNode(env) == nil,
 		"ssh":                 envknob.CanRunTailscaleSSH() == nil,
+		"serve":               true, // TODO: IMPLEMENT
 		"auto-update":         version.IsUnstableBuild() && clientupdate.CanAutoUpdate(),
 	}
 	if env == hostinfo.HomeAssistantAddOn {

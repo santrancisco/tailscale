@@ -84,9 +84,10 @@ export type Feature =
   | "advertise-routes"
   | "use-exit-node"
   | "ssh"
+  | "serve"
   | "auto-update"
 
-export const featureDescription = (f: Feature) => {
+export const featureLongName = (f: Feature) => {
   switch (f) {
     case "advertise-exit-node":
       return "Advertising as an exit node"
@@ -96,6 +97,8 @@ export const featureDescription = (f: Feature) => {
       return "Using an exit node"
     case "ssh":
       return "Running a Tailscale SSH server"
+    case "serve":
+      return "Sharing local content"
     case "auto-update":
       return "Auto updating client versions"
     default:
