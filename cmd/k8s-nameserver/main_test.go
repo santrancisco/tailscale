@@ -7,16 +7,17 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/netip"
-	"reflect"
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/google/go-cmp/cmp"
 	"golang.org/x/net/dns/dnsmessage"
 	"tailscale.com/net/dns/resolver"
 	"tailscale.com/net/tsdial"
+	"tailscale.com/tstest"
 )
 
 func TestNameserver(t *testing.T) {
@@ -41,7 +42,9 @@ func TestNameserver(t *testing.T) {
 		logger:        logger,
 		res:           res,
 	}
-	assert.NoError(t, ns.run(ctx, cancel), "error running nameserver")
+	if err := ns.run(ctx, cancel); err != nil {
+		t.Fatalf("running nameserver: %v", err)
+	}
 
 	// Test that nameserver can resolve a DNS name from provided hosts config
 
@@ -92,14 +95,24 @@ func TestNameserver(t *testing.T) {
 		},
 	}
 	testAddr, err := netip.ParseAddrPort("10.40.30.20:0")
-	assert.NoError(t, err, "error parsing IP address")
+	if err != nil {
+		t.Fatalf("parsing address: %v", err)
+	}
 	packedTestQuery, err := testQuery.Pack()
-	assert.NoError(t, err, "error parsing DNS query")
+	if err != nil {
+		t.Fatalf("packing test query: %v", err)
+	}
 	answer, err := ns.query(ctx, packedTestQuery, testAddr)
-	assert.NoError(t, err, "error querying nameserver")
+	if err != nil {
+		t.Fatalf("querying nameserver: %v", err)
+	}
 	var gotResponse dnsmessage.Message
-	assert.NoError(t, gotResponse.Unpack(answer), "error unpacking DNS answer")
-	assert.Equal(t, gotResponse, wantedResponse)
+	if err := gotResponse.Unpack(answer); err != nil {
+		t.Fatalf("unpacking DNS response: %v", err)
+	}
+	if diff := cmp.Diff(gotResponse, wantedResponse); diff != "" {
+		t.Fatalf("unexpected response (-got +want): \n%s", diff)
+	}
 
 	// Test that nameserver's hosts config gets dynamically updated
 
@@ -163,19 +176,27 @@ func TestNameserver(t *testing.T) {
 		},
 	}
 	packedTestQuery, err = testQuery.Pack()
-	assert.NoError(t, err, "error parsing DNS query")
+	if err != nil {
+		t.Fatalf("packing test query after update: %v", err)
+	}
 
-	// retry a couple times as the nameserver will have eventually processed
-	// the update
-	assert.Eventually(t, func() bool {
-		answer, err = ns.query(ctx, packedTestQuery, testAddr)
-		assert.NoError(t, err, "error querying nameserver")
-		gotResponse = dnsmessage.Message{}
-
-		assert.NoError(t, gotResponse.Unpack(answer), "error unpacking DNS answer")
-		if reflect.DeepEqual(wantedResponse, gotResponse) {
-			return true
+	// Retry a couple times as the nameserver will have eventually processed
+	// the update.
+	checker := func() error {
+		answer, err := ns.query(ctx, packedTestQuery, testAddr)
+		if err != nil {
+			t.Fatalf("querying nameserver after update: %v", err)
 		}
-		return false
-	}, time.Second*5, time.Second)
+		gotResponse = dnsmessage.Message{}
+		if err := gotResponse.Unpack(answer); err != nil {
+			t.Fatalf("error unpacking DNS answer: %v", err)
+		}
+		if diff := cmp.Diff(gotResponse, wantedResponse); diff != "" {
+			return fmt.Errorf("did not get expected response: (-got, +want): \n%s", diff)
+		}
+		return nil
+	}
+	if err := tstest.WaitFor(time.Second*10, checker); err != nil {
+		t.Fatalf("failed waiting for nameserver's config to be updated: %v", err)
+	}
 }

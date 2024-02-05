@@ -3,11 +3,10 @@
 
 //go:build !plan9
 
-package main
-
 // k8s-nameserver is a simple nameserver implementation meant to be used with
 // k8s-operator to allow to resolve magicDNS names of Tailscale nodes in a
 // Kubernetes cluster.
+package main
 
 import (
 	"context"
@@ -28,12 +27,31 @@ import (
 )
 
 const (
+	// defaultDNSConfigDir is the location where, for the default nameserver
+	// deployment, a Configmap with the hosts records will be mounted.
 	defaultDNSConfigDir = "/config"
 	defaultDNSFile      = "dns.json"
 	udpEndpoint         = ":1053"
 
 	kubeletMountedConfigLn = "..data"
 )
+
+var (
+	tsnetRootDomains = []dnsname.FQDN{"ts.net", "ts.net."}
+)
+
+// nameserver is a simple nameserver that can respond to A record queries. It is
+// intended to be used on Kubernetes to enable MagicDNS name resolution in
+// cluster.
+type nameserver struct {
+	configReader  configReaderFunc
+	configWatcher <-chan string
+	res           *resolver.Resolver
+	logger        logger.Logf
+}
+
+// configReaderFunc returns most up to date configuration for the nameserver.
+type configReaderFunc func() ([]byte, error)
 
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -43,6 +61,7 @@ func main() {
 
 	res := resolver.New(logger, nil, nil, &tsdial.Dialer{Logf: logger}, nil)
 
+	// Read configuration for the nameserver from a file.
 	var configReader configReaderFunc = func() ([]byte, error) {
 		if contents, err := os.ReadFile(filepath.Join(defaultDNSConfigDir, defaultDNSFile)); err == nil {
 			return contents, nil
@@ -124,38 +143,41 @@ func main() {
 		conn.Close()
 	}()
 
-	logger("k8s-nameserver listening on: %v", addr)
+	logger("ts.net nameserver listening on: %v", addr)
 
 	for {
-		payloadBuff := make([]byte, 10000)
-		metadataBuff := make([]byte, 512)
-		_, _, _, addr, err := conn.ReadMsgUDP(payloadBuff, metadataBuff)
+		logger("parsing a query")
+		payloadBuff := make([]byte, 4096) // 4096 bytes is the recommended EDNS max payload size https://datatracker.ietf.org/doc/html/rfc6891#section-6.2.5
+		_, _, _, addr, err := conn.ReadMsgUDP(payloadBuff, nil)
 		if err != nil {
 			logger(fmt.Sprintf("error reading UDP message: %v", err))
-			continue
+			return
 		}
-		dnsAnswer, err := ns.query(ctx, payloadBuff, addr.AddrPort())
-		if err != nil {
-			logger(fmt.Sprintf("error querying internal resolver: %v", err))
-			// reply with the dnsAnswer anyway
-		}
-		conn.WriteToUDP(dnsAnswer, addr)
+		go func() {
+			dnsAnswer, err := ns.query(ctx, payloadBuff, addr.AddrPort())
+			if err != nil {
+				logger(fmt.Sprintf("error querying internal resolver: %v", err))
+				// reply with the dnsAnswer anyway
+			}
+			n, err := conn.WriteToUDP(dnsAnswer, addr)
+			if err != nil {
+				logger("error writing UDP response: %v", err)
+			} else {
+				logger("written %d bytes in response", n)
+			}
+		}()
 	}
 }
-
-type nameserver struct {
-	configReader  configReaderFunc
-	configWatcher <-chan string
-	res           *resolver.Resolver
-	logger        logger.Logf
-}
-
-type configReaderFunc func() ([]byte, error)
 
 // run ensures that resolver configuration is up to date with regards to its
 // source. will update config once before returning and keep monitoring it in a
 // thread.
 func (n *nameserver) run(ctx context.Context, cancelF context.CancelFunc) error {
+	n.logger("setting initial resolver config")
+	if err := n.updateResolverConfig(); err != nil {
+		return fmt.Errorf("error updating resolver config: %w", err)
+	}
+	n.logger("successfully updated resolver config")
 	go func() {
 		for {
 			select {
@@ -172,10 +194,6 @@ func (n *nameserver) run(ctx context.Context, cancelF context.CancelFunc) error 
 			}
 		}
 	}()
-	if err := n.updateResolverConfig(); err != nil {
-		return fmt.Errorf("error updating resolver config: %w", err)
-	}
-	n.logger("successfully updated resolver config")
 	return nil
 }
 
@@ -199,14 +217,14 @@ func (n *nameserver) updateResolverConfig() error {
 		n.logger("error unmarshaling json: %v", err)
 		return err
 	}
-	if dnsCfg.Hosts == nil || len(dnsCfg.Hosts) < 1 {
+	if dnsCfg.Hosts == nil || len(dnsCfg.Hosts) == 0 {
 		n.logger("no host records found")
 	}
 	c := resolver.Config{}
 
 	// Ensure that queries for ts.net subdomains are never forwarded to
-	// external resolvers
-	c.LocalDomains = []dnsname.FQDN{"ts.net", "ts.net."}
+	// external resolvers.
+	c.LocalDomains = tsnetRootDomains
 
 	c.Hosts = make(map[dnsname.FQDN][]netip.Addr)
 	for fqdn, ips := range dnsCfg.Hosts {
@@ -224,7 +242,7 @@ func (n *nameserver) updateResolverConfig() error {
 			c.Hosts[fqdn] = []netip.Addr{ip}
 		}
 	}
-	// resolver will lock config so this is safe
+	// Resolver locks its config so this is safe for concurrent calls.
 	n.res.SetConfig(c)
 	return nil
 }
