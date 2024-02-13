@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/http"
 	"net/netip"
@@ -23,6 +24,7 @@ import (
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/store/mem"
 	"tailscale.com/net/interfaces"
+	"tailscale.com/net/netcheck"
 	"tailscale.com/net/tsaddr"
 	"tailscale.com/tailcfg"
 	"tailscale.com/tsd"
@@ -2169,6 +2171,202 @@ func TestOnTailnetDefaultAutoUpdate(t *testing.T) {
 			b.onTailnetDefaultAutoUpdate(tt.tailnetDefault)
 			if want, got := tt.after, b.pm.CurrentPrefs().AutoUpdate().Apply; got != want {
 				t.Errorf("got: %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestSuggestDerpExitNode(t *testing.T) {
+	tests := []struct {
+		name       string
+		lastReport netcheck.Report
+		netMap     netmap.NetworkMap
+		wantValue  tailcfg.StableNodeID
+		wantError  error
+	}{
+		{
+			name: "returns exit node ID given exit nodes and latencies",
+			lastReport: netcheck.Report{
+				RegionLatency: map[int]time.Duration{
+					1: 10 * time.Millisecond,
+					2: 20 * time.Millisecond,
+					3: 30 * time.Millisecond,
+				},
+			},
+			netMap: netmap.NetworkMap{
+				SelfNode: (&tailcfg.Node{
+					Addresses: []netip.Prefix{
+						netip.MustParsePrefix("100.64.1.1/32"),
+						netip.MustParsePrefix("fe70::1/128"),
+					},
+				}).View(),
+				DERPMap: &tailcfg.DERPMap{
+					Regions: map[int]*tailcfg.DERPRegion{
+						1: {},
+						2: {},
+						3: {},
+						4: {},
+						5: {},
+						6: {},
+						7: {},
+						8: {},
+					},
+				},
+				Peers: []tailcfg.NodeView{
+					(&tailcfg.Node{
+						ID:       2,
+						StableID: "2",
+						DERP:     "127.3.3.40:1",
+						AllowedIPs: []netip.Prefix{
+							netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0"),
+						},
+					}).View(),
+					(&tailcfg.Node{
+						ID:       3,
+						StableID: "3",
+						DERP:     "127.3.3.40:1",
+						AllowedIPs: []netip.Prefix{
+							netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0"),
+						},
+					}).View(),
+				},
+			},
+			wantValue: tailcfg.StableNodeID("2"),
+		},
+		{
+			name: "returns exit node ID despite no latencies but has derp based exit node peers",
+			lastReport: netcheck.Report{
+				RegionLatency: map[int]time.Duration{
+					1: 0,
+					2: 0,
+					3: 0,
+				},
+			},
+			netMap: netmap.NetworkMap{
+				SelfNode: (&tailcfg.Node{
+					Addresses: []netip.Prefix{
+						netip.MustParsePrefix("100.64.1.1/32"),
+						netip.MustParsePrefix("fe70::1/128"),
+					},
+				}).View(),
+				DERPMap: &tailcfg.DERPMap{
+					Regions: map[int]*tailcfg.DERPRegion{
+						1: {},
+						2: {},
+						3: {},
+						4: {},
+						5: {},
+						6: {},
+						7: {},
+						8: {},
+					},
+				},
+				Peers: []tailcfg.NodeView{
+					(&tailcfg.Node{
+						ID:       2,
+						StableID: "2",
+						DERP:     "127.3.3.40:1",
+						AllowedIPs: []netip.Prefix{
+							netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0"),
+						},
+					}).View(),
+					(&tailcfg.Node{
+						ID:       3,
+						StableID: "3",
+						DERP:     "127.3.3.40:2",
+						AllowedIPs: []netip.Prefix{
+							netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0"),
+						},
+					}).View(),
+				},
+			},
+			wantValue: tailcfg.StableNodeID("2"),
+		},
+		{
+			name: "returns error if unable to find derp based exit node",
+			lastReport: netcheck.Report{
+				RegionLatency: map[int]time.Duration{
+					1: 0,
+					2: 0,
+					3: 0,
+				},
+			},
+			netMap: netmap.NetworkMap{
+				SelfNode: (&tailcfg.Node{
+					Addresses: []netip.Prefix{
+						netip.MustParsePrefix("100.64.1.1/32"),
+						netip.MustParsePrefix("fe70::1/128"),
+					},
+				}).View(),
+				DERPMap: &tailcfg.DERPMap{
+					Regions: map[int]*tailcfg.DERPRegion{
+						1: {},
+						2: {},
+						3: {},
+						4: {},
+						5: {},
+						6: {},
+						7: {},
+						8: {},
+					},
+				},
+				Peers: []tailcfg.NodeView{
+					(&tailcfg.Node{
+						ID:       2,
+						StableID: "2",
+						AllowedIPs: []netip.Prefix{
+							netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0"),
+						},
+					}).View(),
+					(&tailcfg.Node{
+						ID:       3,
+						StableID: "3",
+						AllowedIPs: []netip.Prefix{
+							netip.MustParsePrefix("0.0.0.0/0"), netip.MustParsePrefix("::/0"),
+						},
+					}).View(),
+				},
+			},
+			wantError: fmt.Errorf("Unable to choose exit node"),
+		},
+		{
+			name: "returns error if no exit node peers",
+			lastReport: netcheck.Report{
+				RegionLatency: map[int]time.Duration{
+					1: 0,
+					2: 0,
+					3: 0,
+				},
+			},
+			netMap: netmap.NetworkMap{
+				SelfNode: (&tailcfg.Node{
+					Addresses: []netip.Prefix{
+						netip.MustParsePrefix("100.64.1.1/32"),
+						netip.MustParsePrefix("fe70::1/128"),
+					},
+				}).View(),
+				DERPMap: &tailcfg.DERPMap{
+					Regions: map[int]*tailcfg.DERPRegion{
+						1: {},
+						2: {},
+						3: {},
+						4: {},
+						5: {},
+						6: {},
+						7: {},
+						8: {},
+					},
+				},
+			},
+			wantError: fmt.Errorf("Unable to choose exit node"),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := suggestDERPExitNode(&tt.lastReport, &tt.netMap, rand.New(rand.NewSource(10)))
+			if got != tt.wantValue && err != tt.wantError {
+				t.Errorf("got value %v error %v want %v error %v", got, err, tt.wantValue, tt.wantError)
 			}
 		})
 	}
