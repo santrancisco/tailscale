@@ -573,6 +573,12 @@ func (h *Handler) serveDebug(w http.ResponseWriter, r *http.Request) {
 		h.b.MagicConn().SetHomeless(true)
 	case "derp-unset-homeless":
 		h.b.MagicConn().SetHomeless(false)
+	case "disable-logtail":
+		h.b.DebugDisableLogtail()
+	case "cc-set-sleep":
+		h.b.DebugControlClientSetSleep(true)
+	case "cc-unset-sleep":
+		h.b.DebugControlClientSetSleep(false)
 	case "rebind":
 		err = h.b.DebugRebind()
 	case "restun":

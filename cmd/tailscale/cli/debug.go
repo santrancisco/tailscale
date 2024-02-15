@@ -132,12 +132,27 @@ var debugCmd = &ffcli.Command{
 		{
 			Name:      "derp-set-homeless",
 			Exec:      localAPIAction("derp-set-homeless"),
-			ShortHelp: "enable DERP homeless mode (breaks reachablility)",
+			ShortHelp: "enable DERP homeless mode (breaks reachability)",
 		},
 		{
 			Name:      "derp-unset-homeless",
 			Exec:      localAPIAction("derp-unset-homeless"),
 			ShortHelp: "disable DERP homeless mode",
+		},
+		{
+			Name:      "disable-logtail",
+			Exec:      localAPIAction("disable-logtail"),
+			ShortHelp: "disables logtail uploads for the lifetime of the process",
+		},
+		{
+			Name:      "cc-set-sleep",
+			Exec:      localAPIAction("cc-set-sleep"),
+			ShortHelp: "asks the control client to sleep",
+		},
+		{
+			Name:      "cc-unset-sleep",
+			Exec:      localAPIAction("cc-unset-sleep"),
+			ShortHelp: "asks the control client to wake up",
 		},
 		{
 			Name:      "break-tcp-conns",

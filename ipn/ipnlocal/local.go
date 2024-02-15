@@ -53,6 +53,7 @@ import (
 	"tailscale.com/ipn/policy"
 	"tailscale.com/log/sockstatlog"
 	"tailscale.com/logpolicy"
+	"tailscale.com/logtail"
 	"tailscale.com/net/dns"
 	"tailscale.com/net/dnscache"
 	"tailscale.com/net/dnsfallback"
@@ -308,6 +309,10 @@ type LocalBackend struct {
 
 	// Last ClientVersion received in MapResponse, guarded by mu.
 	lastClientVersion *tailcfg.ClientVersion
+
+	// isAppleSleeping tracks whether we should be sleeping according to the
+	// NetworkExtension framework in iOS
+	isAppleSleeping bool
 }
 
 type updateStatus struct {
@@ -580,7 +585,13 @@ func (b *LocalBackend) pauseOrResumeControlClientLocked() {
 		return
 	}
 	networkUp := b.prevIfState.AnyInterfaceUp()
-	b.cc.SetPaused((b.state == ipn.Stopped && b.netMap != nil) || (!networkUp && !testenv.InTest()))
+	shouldPause := (b.state == ipn.Stopped && b.netMap != nil) || (!networkUp && !testenv.InTest())
+	if b.cc.IsSleeping() && shouldPause == false {
+		b.logf("pauseOrResumeControlClientLocked: leaving untouched")
+		return
+	}
+	b.logf("pauseOrResumeControlClientLocked: shouldPause = %v", shouldPause)
+	b.cc.SetPaused(shouldPause)
 }
 
 // linkChange is our network monitor callback, called whenever the network changes.
@@ -5325,6 +5336,16 @@ func peerCanProxyDNS(p tailcfg.NodeView) bool {
 		}
 	}
 	return false
+}
+
+func (b *LocalBackend) DebugControlClientSetSleep(enabled bool) {
+	b.logf("DebugControlClientSetSleep: enabled = %v", enabled)
+	b.cc.SetSleepMode(enabled)
+}
+
+func (b *LocalBackend) DebugDisableLogtail() {
+	b.logf("DebugDisableLogtail: disabling")
+	logtail.Disable()
 }
 
 func (b *LocalBackend) DebugRebind() error {
